@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Node Graph</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+        }
+        #canvas {
+            border: 1px solid #000;
+            background-color: white;
+        }
+        #controls {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 10px;
+            border-radius: 5px;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        button, select, input {
+            margin: 5px;
+            padding: 5px 10px;
+            font-size: 14px;
+        }
+        button {
+            cursor: pointer;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 3px;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        select, input {
+            border: 1px solid #ddd;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <div id="controls">
+        <input type="text" id="labelInput" placeholder="Node Label">
+        <select id="nodeType">
+            <option value="default">Default</option>
+            <option value="important">Important</option>
+            <option value="warning">Warning</option>
+        </select>
+        <button id="addNodeBtn">Add Node</button>
+        <button id="deleteNodeBtn">Delete Selected</button>
+        <button id="saveBtn">Save Graph</button>
+        <button id="loadBtn">Load Graph</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const addNodeBtn = document.getElementById('addNodeBtn');
+        const deleteNodeBtn = document.getElementById('deleteNodeBtn');
+        const saveBtn = document.getElementById('saveBtn');
+        const loadBtn = document.getElementById('loadBtn');
+        const labelInput = document.getElementById('labelInput');
+        const nodeTypeSelect = document.getElementById('nodeType');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let nodes = [];
+        let draggingNode = null;
+        let connectingNode = null;
+        let tempLine = null;
+        let selectedNode = null;
+
+        const nodeColors = {
+            default: '#ff0000',
+            important: '#00ff00',
+            warning: '#ff9900'
+        };
+
+        class Node {
+            constructor(x, y, label, type) {
+                this.x = x;
+                this.y = y;
+                this.radius = 20;
+                this.connections = [];
+                this.label = label;
+                this.type = type;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = nodeColors[this.type];
+                ctx.fill();
+                ctx.strokeStyle = this === selectedNode ? '#0000ff' : '#000000';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.closePath();
+
+                ctx.font = '12px Arial';
+                ctx.fillStyle = '#000000';
+                ctx.textAlign = 'center';
+                ctx.fillText(this.label, this.x, this.y + this.radius + 15);
+            }
+
+            isPointInside(x, y) {
+                return Math.sqrt((x - this.x) ** 2 + (y - this.y) ** 2) <= this.radius;
+            }
+        }
+
+        function drawConnection(start, end) {
+            ctx.beginPath();
+            ctx.moveTo(start.x, start.y);
+            ctx.lineTo(end.x, end.y);
+            ctx.strokeStyle = '#0000ff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            nodes.forEach(node => {
+                node.connections.forEach(connectedNode => {
+                    drawConnection(node, connectedNode);
+                });
+            });
+
+            nodes.forEach(node => node.draw());
+
+            if (tempLine) {
+                drawConnection(tempLine.start, tempLine.end);
+            }
+
+            requestAnimationFrame(draw);
+        }
+
+        addNodeBtn.addEventListener('click', () => {
+            const x = Math.random() * (canvas.width - 100) + 50;
+            const y = Math.random() * (canvas.height - 100) + 50;
+            const label = labelInput.value || 'Node ' + (nodes.length + 1);
+            const type = nodeTypeSelect.value;
+            nodes.push(new Node(x, y, label, type));
+            labelInput.value = '';
+        });
+
+        deleteNodeBtn.addEventListener('click', () => {
+            if (selectedNode) {
+                nodes = nodes.filter(node => node !== selectedNode);
+                nodes.forEach(node => {
+                    node.connections = node.connections.filter(conn => conn !== selectedNode);
+                });
+                selectedNode = null;
+            }
+        });
+
+        saveBtn.addEventListener('click', () => {
+            const graphData = JSON.stringify(nodes.map(node => ({
+                x: node.x,
+                y: node.y,
+                label: node.label,
+                type: node.type,
+                connections: node.connections.map(conn => nodes.indexOf(conn))
+            })));
+            localStorage.setItem('nodeGraph', graphData);
+            alert('Graph saved successfully!');
+        });
+
+        loadBtn.addEventListener('click', () => {
+            const graphData = localStorage.getItem('nodeGraph');
+            if (graphData) {
+                const parsedData = JSON.parse(graphData);
+                nodes = parsedData.map(nodeData => new Node(nodeData.x, nodeData.y, nodeData.label, nodeData.type));
+                parsedData.forEach((nodeData, index) => {
+                    nodeData.connections.forEach(connIndex => {
+                        nodes[index].connections.push(nodes[connIndex]);
+                    });
+                });
+                alert('Graph loaded successfully!');
+            } else {
+                alert('No saved graph found!');
+            }
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            selectedNode = null;
+            nodes.forEach(node => {
+                if (node.isPointInside(x, y)) {
+                    if (e.button === 0) { // Left click
+                        draggingNode = node;
+                        selectedNode = node;
+                    } else if (e.button === 2) { // Right click
+                        connectingNode = node;
+                        tempLine = { start: node, end: { x, y } };
+                    }
+                }
+            });
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+
+            if (draggingNode) {
+                draggingNode.x = x;
+                draggingNode.y = y;
+            }
+
+            if (tempLine) {
+                tempLine.end = { x, y };
+            }
+        });
+
+        canvas.addEventListener('mouseup', (e) => {
+            if (draggingNode) {
+                draggingNode = null;
+            }
+
+            if (connectingNode) {
+                const rect = canvas.getBoundingClientRect();
+                const x = e.clientX - rect.left;
+                const y = e.clientY - rect.top;
+
+                nodes.forEach(node => {
+                    if (node !== connectingNode && node.isPointInside(x, y)) {
+                        if (!connectingNode.connections.includes(node)) {
+                            connectingNode.connections.push(node);
+                            node.connections.push(connectingNode);
+                        }
+                    }
+                });
+
+                connectingNode = null;
+                tempLine = null;
+            }
+        });
+
+        canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+
+        draw();
+    </script>
+</body>
+</html>
